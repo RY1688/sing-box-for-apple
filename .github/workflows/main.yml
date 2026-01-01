@@ -1,60 +1,51 @@
-name: Ultimate Core Build (Latest Fix)
+name: Build SingBox 1.12.14 (Fixed Network Path)
 on: workflow_dispatch
 
 jobs:
   build:
     runs-on: macos-14
     steps:
-      - name: Checkout Project
+      - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Setup Go
+      - name: Fetch 1.12.14 Core Framework
         run: |
-          brew install go
-          go install github.com/sagernet/gomobile/cmd/gomobile@latest
-          go install github.com/sagernet/gomobile/cmd/gobind@latest
-          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
-          $(go env GOPATH)/bin/gomobile init
+          # 🔴 使用 curl 替代 git clone，彻底解决路径不存在的问题
+          # 直接抓取官方 1.12.14 编译好的二进制核心
+          curl -L -o core.zip https://github.com/SagerNet/sing-box/releases/download/v1.12.14/SFI-Framework.zip
+          
+          # 创建目录并强制对位
+          mkdir -p Library/sing-box
+          unzip core.zip -d Library/sing-box/
+          
+          # 🔴 关键调试：列出文件确保下载成功，不再报 directory not found
+          ls -R Library/sing-box
 
-      - name: Build Latest Core
+      - name: Xcode Build (Clean & Pure)
         run: |
-          # 🔴 核心改变：强制使用绝对路径下载最新官方内核
-          cd $GITHUB_WORKSPACE
-          git clone --depth 1 https://github.com/SagerNet/sing-box.git official-repo
-          
-          # 🔴 强制寻找：不管它在哪，直接抓出来编译最新的 Go 内核
-          CORE_DIR=$(find $GITHUB_WORKSPACE -name "apple" -type d | grep "cmd/apple" | head -n 1)
-          if [ -z "$CORE_DIR" ]; then echo "Error: Core files not found"; exit 1; fi
-          
-          cd $(dirname $(dirname $CORE_DIR)) # 回到核心根目录
-          go run ./cmd/apple framework
-          
-          # 🔴 强制对位：手动创建项目预期的路径，并把生成的 framework 扔进去
-          mkdir -p $GITHUB_WORKSPACE/Library/sing-box
-          cp -rf *.xcframework $GITHUB_WORKSPACE/Library/sing-box/
-
-      - name: Xcode Build (No Sign)
-        run: |
-          # 剔除干扰插件，确保编译的是无漏洞版本的主程序
+          # 移除干扰插件以确保稳定编译
           rm -rf Extension IntentsExtension WidgetExtension TVExtension
           
+          # 强制指定在刚才下载的路径寻找 1.12.14 内核
           xcodebuild -project sing-box.xcodeproj \
                      -scheme SFI \
                      -configuration Release \
                      -sdk iphoneos \
                      CODE_SIGNING_ALLOWED=NO \
                      CODE_SIGNING_REQUIRED=NO \
+                     FRAMEWORK_SEARCH_PATHS="$(pwd)/Library/sing-box" \
                      clean archive -archivePath build/sing-box.xcarchive
 
       - name: Package IPA
         run: |
           mkdir -p Payload
+          # 寻找编译好的 1.12.14 核心程序包
           APP_PATH=$(find build/sing-box.xcarchive -name "*.app" | head -n 1)
           cp -rp "$APP_PATH" Payload/
-          zip -r sing-box-latest.ipa Payload/
+          zip -r sing-box-1.12.14.ipa Payload/
 
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: SingBox-Secure-Build
-          path: sing-box-latest.ipa
+          name: SingBox-1.12.14-IPA
+          path: sing-box-1.12.14.ipa
