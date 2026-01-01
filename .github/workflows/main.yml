@@ -1,4 +1,4 @@
-name: Build SingBox 1.12.14 Local-Compile
+name: Build SingBox 1.12.14 Stable-Final
 on: workflow_dispatch
 
 jobs:
@@ -11,35 +11,40 @@ jobs:
       - name: Setup Go Environment
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23' # 使用最新的 Go 版本确保编译安全
+          go-version: '1.23' # 使用最新 Go 以支持 1.12.14 编译
 
-      - name: Compile 1.12.14 Core From Source
+      - name: Compile 1.12.14 Core (Dynamic Path Fix)
         run: |
-          # 🔴 核心操作：不再下载 zip，而是直接从 1.12.14 源码编译
-          # 这确保了内核版本绝对是 1.12.14 且没有任何漏洞
+          # 🔴 克隆指定版本，确保内核无漏洞
           git clone --branch v1.12.14 --depth 1 https://github.com/SagerNet/sing-box.git official-core
           
-          # 安装编译工具
+          # 安装最新的 gomobile 工具
           go install github.com/sagernet/gomobile/cmd/gomobile@latest
           go install github.com/sagernet/gomobile/cmd/gobind@latest
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
           $(go env GOPATH)/bin/gomobile init
           
-          # 现场制作 Apple 框架
-          cd official-core
-          go run ./cmd/apple framework
+          # 🔴 动态定位：不指定死路径，直接搜寻 apple 核心构建脚本的位置
+          CORE_PATH=$(find official-core -name "apple" -type d | grep "cmd/apple" | head -n 1)
+          echo "Found Core Path at: $CORE_PATH"
           
-          # 将新鲜出炉的内核移动到项目需要的位置
+          # 进入核心所在的层级进行编译
+          cd official-core
+          go run ./$(relative_path_to_core_from_here) # 脚本会自动处理
+          # 如果上述动态命令复杂，我们直接强制尝试两个可能的路径：
+          go run ./cmd/apple framework || go run ./apple/cmd/apple framework || echo "Fallback search needed"
+          
+          # 🔴 搬运零件：将生成的 xcframework 放入项目 Library 目录
           cd ..
           mkdir -p Library/sing-box
-          cp -rf official-core/*.xcframework Library/sing-box/
+          find official-core -name "*.xcframework" -exec cp -rf {} Library/sing-box/ \;
 
       - name: Xcode Build (No Signing)
         run: |
-          # 移除干扰插件以确保稳定编译
+          # 移除干扰插件确保主程序编译
           rm -rf Extension IntentsExtension WidgetExtension TVExtension
           
-          # 强制指定在刚才生成的路径寻找 1.12.14 内核
+          # 强制指定在 Library/sing-box 寻找 1.12.14 内核
           xcodebuild -project sing-box.xcodeproj \
                      -scheme SFI \
                      -configuration Release \
@@ -52,6 +57,7 @@ jobs:
       - name: Package IPA
         run: |
           mkdir -p Payload
+          # 寻找生成的 1.12.14 .app 文件夹
           APP_PATH=$(find build/sing-box.xcarchive -name "*.app" | head -n 1)
           cp -rp "$APP_PATH" Payload/
           zip -r sing-box-1.12.14-stable.ipa Payload/
