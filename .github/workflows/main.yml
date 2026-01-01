@@ -1,4 +1,4 @@
-name: Manual Core Sync Build
+name: Final Build (Corrected Go Tools)
 on: workflow_dispatch
 
 jobs:
@@ -7,51 +7,56 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
 
-      - name: Force Download Latest Core
+      - name: Setup Go & Correct Mobile Tools
         run: |
-          # 🔴 暴力修复：不等 Git 自动同步，直接手动下载官方最新的 Go 内核
-          # 这样就能确保你编译的是最新版，没有任何漏洞
-          mkdir -p Library
-          rm -rf Library/sing-box
-          git clone --depth 1 --recursive https://github.com/SagerNet/sing-box.git Library/sing-box
-          
-      - name: Setup Go & Mobile
-        run: |
+          # 安装最新稳定版 Go
           brew install go
-          go install github.com/sagernet/gomobile@latest
-          export PATH=$PATH:$(go env GOPATH)/bin
+          # 🔴 关键修复：必须安装 cmd/gomobile 路径，且带上 @latest
+          go install github.com/sagernet/gomobile/cmd/gomobile@latest
+          go install github.com/sagernet/gomobile/cmd/gobind@latest
+          
+          # 将 Go 路径添加到系统环境
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+          # 初始化 gomobile
           $(go env GOPATH)/bin/gomobile init
 
-      - name: Build Core
+      - name: Sync Latest Core (No Vulnerability)
         run: |
-          export PATH=$PATH:$(go env GOPATH)/bin
-          # 既然你追求最新，这里就是直接编译刚才抓取的最新源码
+          # 暴力清空并重新抓取最新内核，确保没有旧版漏洞
+          rm -rf Library/sing-box
+          git clone --depth 1 https://github.com/SagerNet/sing-box.git Library/sing-box
+          
+      - name: Build Core Framework
+        run: |
+          # 编译最新的 Go 核心
           cd Library/sing-box
           go run ./cmd/apple framework
 
-      - name: Build Xcode (Pure IPA)
+      - name: Xcode Build (Skip Signing)
         run: |
-          # 彻底剔除不需要的扩展，防止签名报错
-          find . -name "*Extension" -type d -exec rm -rf {} +
+          # 移除会导致报错的插件
+          rm -rf Extension IntentsExtension WidgetExtension TVExtension
+          # 强制禁用签名编译 IPA
           xcodebuild -project sing-box.xcodeproj \
                      -scheme SFI \
                      -configuration Release \
                      -sdk iphoneos \
                      CODE_SIGNING_ALLOWED=NO \
                      CODE_SIGNING_REQUIRED=NO \
+                     CODE_SIGN_ENTITLEMENTS="" \
                      clean archive -archivePath build/sing-box.xcarchive
 
-      - name: Export IPA
+      - name: Package for TrollStore
         run: |
           mkdir -p Payload
-          cp -rp build/sing-box.xcarchive/Products/Applications/*.app Payload/
+          # 寻找生成的 app 并打包成 ipa
+          APP_PATH=$(find build/sing-box.xcarchive -name "*.app" | head -n 1)
+          cp -rp "$APP_PATH" Payload/
           zip -r sing-box-latest.ipa Payload/
 
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: Latest-SingBox-IPA
+          name: Latest-Secure-IPA
           path: sing-box-latest.ipa
