@@ -1,4 +1,4 @@
-name: Build Sing-Box IPA (Final Version)
+name: Build Unsigned IPA
 on: workflow_dispatch
 
 jobs:
@@ -8,59 +8,57 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          # 🔴 关键：必须递归拉取所有依赖，否则代码是不全的
+          # 🔴 核心修复 1：递归拉取所有子模块
           submodules: recursive
           fetch-depth: 0
 
       - name: Setup Go
-        run: |
-          brew install go
-          echo "$(brew --prefix go)/bin" >> $GITHUB_PATH
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          # 🔴 核心修复 2：彻底禁用缓存检查，解决 go.sum 报错
+          cache: false 
 
       - name: Build Core Framework
         run: |
-          # 1. 安装构建工具
+          # 1. 安装基础工具
           go install github.com/sagernet/gomobile@latest
           export PATH=$PATH:$(go env GOPATH)/bin
           gomobile init
           
-          # 2. 🔴 关键修复：全自动寻找 go.mod 所在位置并执行编译
-          # 无论核心在哪个文件夹，它都能找到并进去编译
+          # 2. 🔴 核心修复 3：全自动寻找项目根目录并编译
+          # 如果根目录没 go.mod，它会搜索包含 cmd/apple 的目录
           CORE_PATH=$(find . -name "go.mod" -exec grep -l "sing-box" {} + | head -n 1 | xargs dirname)
-          echo "Found Core at: $CORE_PATH"
+          echo "Found Go Core at: $CORE_PATH"
           cd "$CORE_PATH"
+          
+          # 执行编译核心框架
           go run ./cmd/apple framework
-
-      - name: Clean Extensions
-        run: |
-          # 🔴 关键修复：强行删除所有会导致签名报错的插件目录
-          # 只要这些文件夹在，没有苹果证书就一定会报错
-          find . -name "*Extension" -type d -exec rm -rf {} +
-          rm -rf SFM.System
 
       - name: Build Xcode
         run: |
-          # 🔴 使用你截图中看到的最新工程名
-          xcodebuild -project sing-box.xcodeproj \
-                     -scheme sing-box \
+          # 🔴 核心修复 4：全自动定位 .xcodeproj 文件
+          PROJ_FILE=$(find . -name "*.xcodeproj" -maxdepth 3 | head -n 1)
+          echo "Found Project: $PROJ_FILE"
+          
+          xcodebuild -project "$PROJ_FILE" \
+                     -scheme SFI \
                      -configuration Release \
                      -sdk iphoneos \
                      CODE_SIGNING_ALLOWED=NO \
                      CODE_SIGNING_REQUIRED=NO \
-                     CODE_SIGN_ENTITLEMENTS="" \
-                     BITCODE_GENERATION_MODE=bitcode \
-                     clean archive -archivePath build/sing-box.xcarchive
+                     clean archive -archivePath build/SFI.xcarchive
 
       - name: Package IPA
         run: |
-          # 封装为 TrollStore 可用的 IPA
+          # 封装为 IPA 格式
           mkdir -p Payload
-          APP_PATH=$(find build/sing-box.xcarchive -name "*.app" | head -n 1)
-          cp -r "$APP_PATH" Payload/
-          zip -r sing-box-final.ipa Payload/
+          APP_DIR=$(find build/SFI.xcarchive -name "*.app" | head -n 1)
+          cp -r "$APP_DIR" Payload/
+          zip -r sing-box-dev.ipa Payload/
 
-      - name: Upload
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: sing-box-ipa
-          path: sing-box-final.ipa
+          path: sing-box-dev.ipa
