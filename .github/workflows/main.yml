@@ -1,4 +1,4 @@
-name: Build Unsigned IPA
+name: Build Unsigned IPA (Force Fix)
 on: workflow_dispatch
 
 jobs:
@@ -8,31 +8,39 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          # 🔴 关键：必须递归拉取子模块，否则 Library 文件夹是空的
-          submodules: recursive
+          submodules: recursive # 必须递归拉取核心代码
           fetch-depth: 0
 
-      - name: Manual Setup Go
+      - name: Setup Go Environment
         run: |
-          # 🔴 关键：直接通过 brew 安装，避开官方 Action 对 go.sum 的严格检查
+          # 绕过 go.sum 检查，直接在系统安装 Go
           brew install go
           echo "$(brew --prefix go)/bin" >> $GITHUB_PATH
 
       - name: Build Core Framework
         run: |
-          # 1. 安装构建工具
+          # 1. 准备构建工具
           go install github.com/sagernet/gomobile@latest
           export PATH=$PATH:$(go env GOPATH)/bin
           $(go env GOPATH)/bin/gomobile init
           
-          # 2. 🔴 关键：进入核心子模块目录编译，解决找不到依赖文件的问题
+          # 2. 进入核心子模块执行编译
           cd Library/sing-box
           go run ./cmd/apple framework
 
+      - name: Remove Extensions (Crucial Fix)
+        run: |
+          # 🔴 关键修复：删除会导致签名报错的扩展组件
+          # 这些组件在免签名构建时必定失败，必须剔除
+          rm -rf Extension
+          rm -rf IntentsExtension
+          rm -rf WidgetExtension
+          rm -rf FileProviderExtension
+          rm -rf TVExtension
+
       - name: Build Xcode Project
         run: |
-          # 🔴 关键：使用 xcodebuild 强制不签名编译
-          # 自动定位项目文件并打包成存档
+          # 强制不签名编译主程序
           xcodebuild -project SFI/SFI.xcodeproj \
                      -scheme SFI \
                      -configuration Release \
@@ -40,18 +48,18 @@ jobs:
                      CODE_SIGNING_ALLOWED=NO \
                      CODE_SIGNING_REQUIRED=NO \
                      CODE_SIGN_ENTITLEMENTS="" \
-                     BITCODE_GENERATION_MODE=bitcode \
+                     AD_HOC_CODE_SIGNING_ALLOWED=YES \
                      clean archive -archivePath build/SFI.xcarchive
 
       - name: Package IPA
         run: |
-          # 🔴 关键：手动封装 Payload 文件夹，这是 TrollStore 识别 IPA 的标准格式
+          # 手动封装符合 TrollStore 标准的 IPA
           mkdir -p Payload
           cp -r build/SFI.xcarchive/Products/Applications/SFI.app Payload/
-          zip -r sing-box-dev.ipa Payload/
+          zip -r sing-box-final.ipa Payload/
 
-      - name: Upload IPA
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: sing-box-ipa
-          path: sing-box-dev.ipa
+          path: sing-box-final.ipa
