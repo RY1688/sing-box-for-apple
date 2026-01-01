@@ -1,4 +1,4 @@
-name: Build Sing-Box IPA (Manual Force)
+name: Build Sing-Box IPA (Manual Sync)
 on: workflow_dispatch
 
 jobs:
@@ -8,62 +8,50 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          # 🔴 强制拉取子模块
           submodules: recursive
           fetch-depth: 0
 
-      - name: Force Download Missing Core
+      - name: Force Fix Directory Structure
         run: |
-          # 🔴 如果 Library/sing-box 是空的，强行下载它
-          if [ ! -d "Library/sing-box" ] || [ ! -f "Library/sing-box/go.mod" ]; then
-            echo "Core missing, force downloading..."
-            rm -rf Library/sing-box
-            git clone --recursive https://github.com/SagerNet/sing-box.git Library/sing-box
+          # 🔴 关键修复：如果你下载的代码里没有 SFI 文件夹，这里强行补齐
+          if [ ! -d "SFI" ]; then
+            echo "SFI directory missing, creating alias..."
+            # 尝试寻找主程序目录并建立软连接
+            find . -maxdepth 2 -name "sing-box.xcodeproj" -exec dirname {} + | xargs -I {} ln -s {} SFI
           fi
 
       - name: Setup Go
-        run: |
-          brew install go
-          echo "$(brew --prefix go)/bin" >> $GITHUB_PATH
+        run: brew install go
 
-      - name: Build Core Framework
+      - name: Build Framework
         run: |
           go install github.com/sagernet/gomobile@latest
-          export PATH=$PATH:$(go env GOPATH)/bin
           $(go env GOPATH)/bin/gomobile init
-          # 进入核心目录编译
-          cd Library/sing-box
-          go run ./cmd/apple framework
+          # 🔴 关键：即使 Library 下没东西，我们也强行克隆核心
+          git clone --recursive https://github.com/SagerNet/sing-box.git Library/sing-box || true
+          cd Library/sing-box && go run ./cmd/apple framework
 
-      - name: Build Xcode (Using your script logic)
+      - name: Build Xcode
         run: |
-          # 🔴 核心修复：移除所有干扰插件，只编主程序
-          rm -rf Extension IntentsExtension WidgetExtension TVExtension
-          
-          # 执行编译 (参考你的 make_ios.sh 逻辑)
+          # 🔴 强制使用你提供的脚本变量
           xcodebuild -project sing-box.xcodeproj \
                      -scheme SFI \
-                     -destination generic/platform=iOS \
                      -configuration Debug \
                      -sdk iphoneos \
                      CODE_SIGNING_ALLOWED=NO \
                      CODE_SIGNING_REQUIRED=NO \
                      CODE_SIGN_ENTITLEMENTS="" \
-                     clean build install \
-                     DSTROOT=packages/
+                     clean archive -archivePath build/sing-box.xcarchive
 
-      - name: Package IPA (make_ios.sh logic)
+      - name: Package
         run: |
-          # 按照你脚本的逻辑封装 Payload
-          mkdir -p packages/Payload
-          # 寻找生成的 .app 并复制
-          APP_DIR=$(find packages/Applications -name "*.app" | head -n 1)
-          cp -rp "$APP_DIR" packages/Payload/
-          cd packages
-          zip -qr sing-box-trollstore.ipa Payload/
+          mkdir -p Payload
+          APP_PATH=$(find build/sing-box.xcarchive -name "*.app" | head -n 1)
+          cp -rp "$APP_PATH" Payload/
+          zip -r sing-box-trollstore.ipa Payload/
 
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: sing-box-ipa
-          path: packages/sing-box-trollstore.ipa
+          path: sing-box-trollstore.ipa
