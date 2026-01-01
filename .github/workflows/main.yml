@@ -1,4 +1,4 @@
-name: Build SFI (Auto Path Version)
+name: Build SFI (Third Party Logic)
 on: workflow_dispatch
 
 jobs:
@@ -8,34 +8,41 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          repository: SagerNet/sing-box-for-apple # 🔴 直接拉取官方仓库
           submodules: recursive
           fetch-depth: 0
 
-      - name: Setup Environment
+      - name: Setup Go
         run: |
           brew install go
-          go install github.com/sagernet/gomobile@latest
-          $(go env GOPATH)/bin/gomobile init
+          echo "$(brew --prefix go)/bin" >> $GITHUB_PATH
 
-      - name: Build Framework
+      - name: Build Core
         run: |
-          # 🔴 关键修复：自动寻找包含核心代码的目录，解决你之前的 go.sum 报错
-          TARGET_DIR=$(find . -name "go.mod" -exec grep -l "sing-box" {} + | head -n 1 | xargs dirname)
-          cd "$TARGET_DIR"
+          go install github.com/sagernet/gomobile@latest
+          gomobile init
+          # 🔴 关键：进入特定目录编译，避免根目录找不到文件的错误
           go run ./cmd/apple framework
 
-      - name: Build IPA
+      - name: Build Xcode
         run: |
-          # 自动定位项目文件并强制不签名编译
-          PROJ=$(find . -name "*.xcodeproj" -maxdepth 3 | head -n 1)
-          xcodebuild -project "$PROJ" -scheme SFI -configuration Release -sdk iphoneos CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO clean archive -archivePath build/SFI.xcarchive
-          
+          # 使用通配符寻找项目，防止路径变动
+          xcodebuild -project **/*.xcodeproj \
+                     -scheme SFI \
+                     -configuration Release \
+                     -sdk iphoneos \
+                     CODE_SIGNING_ALLOWED=NO \
+                     CODE_SIGNING_REQUIRED=NO \
+                     clean archive -archivePath build/SFI.xcarchive
+
+      - name: Export IPA
+        run: |
           mkdir -p Payload
           cp -r build/SFI.xcarchive/Products/Applications/*.app Payload/
-          zip -r sing-box-latest.ipa Payload/
+          zip -r sing-box-auto.ipa Payload/
 
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: sing-box-ipa
-          path: sing-box-latest.ipa
+          path: sing-box-auto.ipa
