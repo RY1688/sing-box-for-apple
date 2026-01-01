@@ -1,4 +1,4 @@
-name: Build SingBox 1.12.14 Stable (Path Auto-Fix)
+name: Build SingBox 1.12.14 Stable (Java Fix)
 on: workflow_dispatch
 
 jobs:
@@ -8,50 +8,42 @@ jobs:
       - name: Checkout Project
         uses: actions/checkout@v4
 
+      - name: Setup Java 17 (Crucial Fix)
+        # 🔴 修复 FATAL[0000] 报错：强制配置 gomobile 要求的 OpenJDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'microsoft'
+          java-version: '17'
+
       - name: Setup Go Environment
         uses: actions/setup-go@v5
         with:
           go-version: '1.23'
 
-      - name: Native Compile 1.12.14 Core (Dynamic)
+      - name: Native Compile 1.12.14 Core
         run: |
-          # 1. 🟢 彻底清理并重新拉取 v1.12.14 源码
-          rm -rf official-repo
+          # 1. 🟢 拉取 1.12.14 官方源码
           git clone --branch v1.12.14 --depth 1 https://github.com/SagerNet/sing-box.git official-repo
           
-          # 2. 🟢 安装并初始化编译工具
+          # 2. 🟢 安装编译工具
           go install github.com/sagernet/gomobile/cmd/gomobile@latest
           go install github.com/sagernet/gomobile/cmd/gobind@latest
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
           $(go env GOPATH)/bin/gomobile init
           
-          # 3. 🔴 核心修复：全自动定位。搜索包含苹果编译逻辑的 main.go
-          # 不管官方把它藏在哪个子文件夹，直接锁定它
-          CORE_ENTRY=$(find official-repo -name "main.go" | xargs grep -l "apple" | grep "cmd" | head -n 1)
-          if [ -z "$CORE_ENTRY" ]; then
-            echo "Error: Cannot find apple build entry. Falling back to directory search..."
-            CORE_DIR=$(find official-repo -name "apple" -type d | grep "cmd" | head -n 1)
-          else
-            CORE_DIR=$(dirname "$CORE_ENTRY")
-          fi
-          
-          echo "Found Core Entry at: $CORE_DIR"
+          # 3. 🟢 定位入口并编译 (有了 Java 17 之后，这一步才不会报错)
+          CORE_DIR=$(find official-repo -name "apple" -type d | grep "cmd/apple" | head -n 1)
           cd "$CORE_DIR"
-          
-          # 4. 🟢 现场编译生成无漏洞内核
           go run . framework -v
           
-          # 5. 🟢 搬运成果到项目 Library
+          # 4. 🟢 搬运成果
           cd $GITHUB_WORKSPACE
           mkdir -p Library/sing-box
           find official-repo -name "*.xcframework" -exec cp -rf {} Library/sing-box/ \;
 
       - name: Xcode Build (Skip Signing)
         run: |
-          # 移除干扰项
           rm -rf Extension IntentsExtension WidgetExtension TVExtension
-          
-          # 强制 Xcode 使用我们刚才生成的 1.12.14 内核
           xcodebuild -project sing-box.xcodeproj \
                      -scheme SFI \
                      -configuration Release \
@@ -68,7 +60,7 @@ jobs:
           cp -rp "$APP_PATH" Payload/
           zip -r sing-box-1.12.14-stable.ipa Payload/
 
-      - name: Upload Artifact
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: SingBox-1.12.14-IPA
