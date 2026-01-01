@@ -1,4 +1,4 @@
-name: Build SingBox 1.12.14 Stable-Final-v5
+name: Build SingBox 1.12.14 Stable-Final-v6
 on: workflow_dispatch
 
 jobs:
@@ -14,43 +14,37 @@ jobs:
           go-version: '1.23'
           cache: true
 
-      - name: Compile 1.12.14 Core (Module Environment Fix)
+      - name: Compile 1.12.14 Core (Explicit Path Fix)
         run: |
           export GOPROXY=https://proxy.golang.org,direct
           
-          # 1. 抓取 v1.12.14 源码
+          # 1. 下载 v1.12.14 源码
           git clone --branch v1.12.14 --depth 1 https://github.com/SagerNet/sing-box.git official-core
           
-          # 2. 安装 gomobile 工具
+          # 2. 安装并初始化 gomobile
           go install github.com/sagernet/gomobile/cmd/gomobile@latest
           go install github.com/sagernet/gomobile/cmd/gobind@latest
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
           $(go env GOPATH)/bin/gomobile init
           
-          # 3. 动态定位并准备环境
-          REAL_PATH=$(find $GITHUB_WORKSPACE/official-core -name "apple" -type d | grep "cmd/apple" | head -n 1)
-          echo "Found entry point at: $REAL_PATH"
+          # 3. 🔴 关键修复：不再使用 cd，而是直接告诉 gomobile 执行官方的构建脚本
+          # 在 1.12.14 中，构建逻辑由 cmd/apple/main.go 处理
+          cd official-core
           
-          # 🔴 关键修复：在入口目录强制关联根目录的模块
-          cd "$REAL_PATH"
-          if [ ! -f "go.mod" ]; then
-            echo "Initializing temporary module context..."
-            # 链接回根目录的依赖，确保编译能找到所有包
-            go mod init github.com/sagernet/sing-box/cmd/apple || true
-            go mod tidy || true
-          fi
+          # 运行官方提供的苹果端构建命令，生成 .xcframework
+          go run ./cmd/apple framework -v
           
-          # 4. 执行编译 (使用全路径确保引用正确)
-          go run . framework -v
-          
-          # 5. 搬运生成的框架
+          # 4. 搬运生成的框架到 Xcode 预期的位置
           cd $GITHUB_WORKSPACE
           mkdir -p Library/sing-box
           find official-core -name "*.xcframework" -exec cp -rf {} Library/sing-box/ \;
 
       - name: Xcode Build (No Signing)
         run: |
+          # 移除干扰插件以确保稳定
           rm -rf Extension IntentsExtension WidgetExtension TVExtension
+          
+          # 强制在 Library/sing-box 寻找刚才编译好的 1.12.14 内核
           xcodebuild -project sing-box.xcodeproj \
                      -scheme SFI \
                      -configuration Release \
