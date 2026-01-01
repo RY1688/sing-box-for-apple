@@ -1,57 +1,56 @@
-name: Secure Build (Final Path Fix)
+name: Root Direct Build (No Path Error)
 on: workflow_dispatch
 
 jobs:
   build:
     runs-on: macos-14
     steps:
-      - name: Checkout
+      - name: Checkout Project
         uses: actions/checkout@v4
 
-      - name: Setup Go & Tools
+      - name: Setup Go Environment
         run: |
           brew install go
-          # 🔴 使用正确的安装路径
           go install github.com/sagernet/gomobile/cmd/gomobile@latest
           go install github.com/sagernet/gomobile/cmd/gobind@latest
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
           $(go env GOPATH)/bin/gomobile init
 
-      - name: Build Core (Direct Source)
+      - name: Build Core (Latest & Clean)
         run: |
-          # 🔴 不再使用 Library 目录，直接在根目录下载最新官方内核
-          git clone --depth 1 https://github.com/SagerNet/sing-box.git official-core
-          cd official-core
+          # 🔴 核心变动：直接在当前根目录下载最新内核源码
+          git clone --depth 1 https://github.com/SagerNet/sing-box.git
           
-          # 编译最新的 Go 核心框架
-          go run ./cmd/apple framework
+          # 🔴 不使用 cd 进入文件夹，直接指定路径编译
+          # 这样可以确保日志能输出到底在哪里报错
+          ls -R sing-box/cmd/apple # 调试：强制列出目录结构确认文件存在
           
-          # 🔴 关键对位：手动创建项目预期的路径，并把生成的 framework 扔进去
-          cd ..
+          # 执行编译最新内核
+          go run ./sing-box/cmd/apple framework
+          
+          # 🔴 暴力移动：把生成的 xcframework 强制塞进项目每个可能的坑位
           mkdir -p Library/sing-box
-          cp -rf official-core/*.xcframework Library/sing-box/
-          # 同时拷贝必要头文件以防 Xcode 找不到定义
-          cp -rf official-core/apple Library/sing-box/ || true
+          cp -rf *.xcframework Library/sing-box/ || true
+          cp -rf sing-box/*.xcframework Library/sing-box/ || true
 
-      - name: Xcode Build (Skip Signing)
+      - name: Xcode Build (No Sign)
         run: |
-          # 剔除干扰插件，只留核心 SFI
+          # 彻底删除干扰项
           rm -rf Extension IntentsExtension WidgetExtension TVExtension
           
-          # 编译 IPA，彻底禁用签名
+          # 强制指定在根目录寻找刚才生成的零件
           xcodebuild -project sing-box.xcodeproj \
                      -scheme SFI \
                      -configuration Release \
                      -sdk iphoneos \
                      CODE_SIGNING_ALLOWED=NO \
                      CODE_SIGNING_REQUIRED=NO \
-                     CODE_SIGN_ENTITLEMENTS="" \
+                     FRAMEWORK_SEARCH_PATHS="$(pwd)/Library/sing-box" \
                      clean archive -archivePath build/sing-box.xcarchive
 
-      - name: Package for TrollStore
+      - name: Package IPA
         run: |
           mkdir -p Payload
-          # 寻找生成的 .app 并存入 Payload
           APP_PATH=$(find build/sing-box.xcarchive -name "*.app" | head -n 1)
           cp -rp "$APP_PATH" Payload/
           zip -r sing-box-latest.ipa Payload/
@@ -59,5 +58,5 @@ jobs:
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: SingBox-Latest-Secure
+          name: SingBox-Latest-Build
           path: sing-box-latest.ipa
