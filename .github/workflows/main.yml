@@ -1,4 +1,4 @@
-name: Build Pure IPA for TrollStore
+name: Ultimate SingBox Build (Core Fixed)
 on: workflow_dispatch
 
 jobs:
@@ -8,13 +8,14 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          submodules: recursive # 🔴 尝试拉取子模块
+          submodules: recursive
           fetch-depth: 0
 
-      - name: Force Sync Core
+      - name: Force Fix Missing Core
         run: |
-          # 🔴 核心修复：如果子模块文件夹是空的，强行手动下载
-          if [ ! -d "Library/sing-box" ] || [ ! -f "Library/sing-box/go.mod" ]; then
+          # 🔴 关键修复：如果 Library 里的核心代码文件夹是空的，强行手动下载最新内核
+          if [ ! -f "Library/sing-box/go.mod" ]; then
+            echo "Detecting missing core, force cloning..."
             rm -rf Library/sing-box
             git clone --recursive https://github.com/SagerNet/sing-box.git Library/sing-box
           fi
@@ -29,17 +30,16 @@ jobs:
       - name: Build Core Framework
         run: |
           export PATH=$PATH:$(go env GOPATH)/bin
-          # 进入补全后的核心目录
           cd Library/sing-box
+          # 这里会根据最新的官方代码编译内核框架
           go run ./cmd/apple framework
 
-      - name: Build Xcode (Pure Mode)
+      - name: Build Xcode (No Signing)
         run: |
-          # 🔴 剔除干扰：删除所有会导致签名报错的 Extension 文件夹
+          # 删除干扰项，避免证书报错
           find . -name "*Extension" -type d -exec rm -rf {} +
           
-          # 使用你截图中的工程名 sing-box.xcodeproj
-          # 彻底禁用签名，只产出纯净的 .app
+          # 强制指定你截图中的工程名
           xcodebuild -project sing-box.xcodeproj \
                      -scheme SFI \
                      -configuration Release \
@@ -51,15 +51,13 @@ jobs:
 
       - name: Package for TrollStore
         run: |
-          # 建立标准 Payload 结构
           mkdir -p Payload
-          # 寻找生成的 .app 并存入
           APP_PATH=$(find build/sing-box.xcarchive -name "*.app" | head -n 1)
           cp -rp "$APP_PATH" Payload/
-          zip -r sing-box-trollstore.ipa Payload/
+          zip -r sing-box-latest.ipa Payload/
 
-      - name: Upload IPA
+      - name: Upload Latest IPA
         uses: actions/upload-artifact@v4
         with:
-          name: TrollStore-IPA
-          path: sing-box-trollstore.ipa
+          name: SingBox-Latest-Build
+          path: sing-box-latest.ipa
