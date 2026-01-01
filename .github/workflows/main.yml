@@ -1,4 +1,4 @@
-name: Build SingBox 1.12.14 (Environment Resolved)
+name: Build SingBox 1.12.14 Final Victory
 on: workflow_dispatch
 
 jobs:
@@ -8,48 +8,45 @@ jobs:
       - name: Checkout Project
         uses: actions/checkout@v4
 
-      - name: Setup Java 17 (Fix FATAL Error)
-        # 🔴 核心修复 1：解决 gomobile 对 OpenJDK 17 的强制要求
+      - name: Force Setup Environment (Java 17 & Go)
+        # 🔴 解决冲突 1：强制降级 Java，满足 gomobile 严苛要求
         uses: actions/setup-java@v4
         with:
           distribution: 'microsoft'
           java-version: '17'
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5
         with:
           go-version: '1.23'
-          cache: true
 
-      - name: Build 1.12.14 Core From Source
+      - name: Build Core (Absolute Workspace Fix)
         run: |
-          # 1. 🟢 克隆 1.12.14 源码
-          git clone --branch v1.12.14 --depth 1 https://github.com/SagerNet/sing-box.git official-core
+          # 🔴 解决冲突 2：不再依赖相对路径，全部使用绝对变量
+          WORK_DIR=$GITHUB_WORKSPACE
+          export GOPROXY=https://proxy.golang.org,direct
           
-          # 2. 🟢 配置编译环境
+          # 克隆 1.12.14 稳定版源码
+          git clone --branch v1.12.14 --depth 1 https://github.com/SagerNet/sing-box.git $WORK_DIR/official-core
+          
+          # 安装编译工具
           go install github.com/sagernet/gomobile/cmd/gomobile@latest
           go install github.com/sagernet/gomobile/cmd/gobind@latest
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
-          
-          # 3. 🔴 核心修复 2：在根目录执行编译，避免 "no main module" 错误
-          # 我们不再 cd 进入子目录，而是告诉 go 编译器直接运行指定包
-          cd official-core
           $(go env GOPATH)/bin/gomobile init
           
-          # 既然你追求无漏洞稳定版，这里就是现场制造 1.12.14 内核
+          # 🔴 解决冲突 3：直接在源码根目录执行编译，防止找不到 Module
+          cd $WORK_DIR/official-core
           go run ./cmd/apple framework -v
           
-          # 4. 🟢 成果搬运
-          cd $GITHUB_WORKSPACE
-          mkdir -p Library/sing-box
-          cp -rf official-core/*.xcframework Library/sing-box/
+          # 🔴 解决冲突 4：强制物理对位，把生成的零件塞进项目
+          mkdir -p $WORK_DIR/Library/sing-box
+          cp -rf $WORK_DIR/official-core/*.xcframework $WORK_DIR/Library/sing-box/
 
-      - name: Xcode Build (TrollStore Ready)
+      - name: Xcode Build (TrollStore Pure IPA)
         run: |
-          # 移除干扰插件确保主程序编译成功
+          # 彻底剔除不需要的插件
           rm -rf Extension IntentsExtension WidgetExtension TVExtension
           
-          # 强制 Xcode 使用我们刚才生成的 1.12.14 内核
+          # 强制 Xcode 只看我们刚才生成的 1.12.14 内核
           xcodebuild -project sing-box.xcodeproj \
                      -scheme SFI \
                      -configuration Release \
@@ -59,15 +56,15 @@ jobs:
                      FRAMEWORK_SEARCH_PATHS="$(pwd)/Library/sing-box" \
                      clean archive -archivePath build/sing-box.xcarchive
 
-      - name: Export IPA
+      - name: Export & Package
         run: |
           mkdir -p Payload
           APP_PATH=$(find build/sing-box.xcarchive -name "*.app" | head -n 1)
           cp -rp "$APP_PATH" Payload/
           zip -r sing-box-1.12.14-stable.ipa Payload/
 
-      - name: Upload
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SingBox-1.12.14-IPA
+          name: SingBox-1.12.14-Success
           path: sing-box-1.12.14-stable.ipa
