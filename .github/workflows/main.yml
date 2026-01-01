@@ -1,4 +1,4 @@
-name: Build SingBox 1.12.14 Stable (Final Solution)
+name: Build SingBox 1.12.14 Stable (Path Auto-Fix)
 on: workflow_dispatch
 
 jobs:
@@ -11,32 +11,44 @@ jobs:
       - name: Setup Go Environment
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23' #
+          go-version: '1.23'
 
-      - name: Native Compile 1.12.14 Core
+      - name: Native Compile 1.12.14 Core (Dynamic)
         run: |
-          # 1. 🟢 直接拉取 1.12.14 官方源码 (Git 协议最稳健)
+          # 1. 🟢 彻底清理并重新拉取 v1.12.14 源码
+          rm -rf official-repo
           git clone --branch v1.12.14 --depth 1 https://github.com/SagerNet/sing-box.git official-repo
           
-          # 2. 🟢 安装并初始化 Apple 编译工具
+          # 2. 🟢 安装并初始化编译工具
           go install github.com/sagernet/gomobile/cmd/gomobile@latest
           go install github.com/sagernet/gomobile/cmd/gobind@latest
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
           $(go env GOPATH)/bin/gomobile init
           
-          # 3. 🟢 核心对位：强制定位到 Apple 框架编译入口
-          cd official-repo/cmd/apple
+          # 3. 🔴 核心修复：全自动定位。搜索包含苹果编译逻辑的 main.go
+          # 不管官方把它藏在哪个子文件夹，直接锁定它
+          CORE_ENTRY=$(find official-repo -name "main.go" | xargs grep -l "apple" | grep "cmd" | head -n 1)
+          if [ -z "$CORE_ENTRY" ]; then
+            echo "Error: Cannot find apple build entry. Falling back to directory search..."
+            CORE_DIR=$(find official-repo -name "apple" -type d | grep "cmd" | head -n 1)
+          else
+            CORE_DIR=$(dirname "$CORE_ENTRY")
+          fi
           
-          # 4. 🟢 现场编译 (生成无漏洞的 1.12.14 二进制零件)
+          echo "Found Core Entry at: $CORE_DIR"
+          cd "$CORE_DIR"
+          
+          # 4. 🟢 现场编译生成无漏洞内核
           go run . framework -v
           
-          # 5. 🟢 零件搬运：将新鲜出炉的框架对位到项目目录
-          mkdir -p ../../../Library/sing-box
-          cp -rf *.xcframework ../../../Library/sing-box/
+          # 5. 🟢 搬运成果到项目 Library
+          cd $GITHUB_WORKSPACE
+          mkdir -p Library/sing-box
+          find official-repo -name "*.xcframework" -exec cp -rf {} Library/sing-box/ \;
 
       - name: Xcode Build (Skip Signing)
         run: |
-          # 移除干扰插件确保主程序编译成功
+          # 移除干扰项
           rm -rf Extension IntentsExtension WidgetExtension TVExtension
           
           # 强制 Xcode 使用我们刚才生成的 1.12.14 内核
