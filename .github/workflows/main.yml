@@ -1,4 +1,4 @@
-name: Final Build SingBox 1.12.14 Stable
+name: Build SingBox 1.12.14 Stable (Final Solution)
 on: workflow_dispatch
 
 jobs:
@@ -8,24 +8,38 @@ jobs:
       - name: Checkout Project
         uses: actions/checkout@v4
 
-      - name: Inject 1.12.14 Core Framework
-        run: |
-          # 🔴 直接拉取官方为 iOS 准备的 1.12.14 核心零件
-          curl -L -o core.zip https://github.com/SagerNet/sing-box/releases/download/v1.12.14/SFI-Framework.zip
-          
-          # 强制创建目标零件坑位
-          mkdir -p Library/sing-box
-          unzip -o core.zip -d Library/sing-box/
-          
-          # 🔴 关键验证：如果这一步列出了 xcframework，就说明零件已到位
-          ls -R Library/sing-box
+      - name: Setup Go Environment
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23' #
 
-      - name: Xcode Build (TrollStore Compatible)
+      - name: Native Compile 1.12.14 Core
         run: |
-          # 移除导致证书报错的干扰项
+          # 1. 🟢 直接拉取 1.12.14 官方源码 (Git 协议最稳健)
+          git clone --branch v1.12.14 --depth 1 https://github.com/SagerNet/sing-box.git official-repo
+          
+          # 2. 🟢 安装并初始化 Apple 编译工具
+          go install github.com/sagernet/gomobile/cmd/gomobile@latest
+          go install github.com/sagernet/gomobile/cmd/gobind@latest
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+          $(go env GOPATH)/bin/gomobile init
+          
+          # 3. 🟢 核心对位：强制定位到 Apple 框架编译入口
+          cd official-repo/cmd/apple
+          
+          # 4. 🟢 现场编译 (生成无漏洞的 1.12.14 二进制零件)
+          go run . framework -v
+          
+          # 5. 🟢 零件搬运：将新鲜出炉的框架对位到项目目录
+          mkdir -p ../../../Library/sing-box
+          cp -rf *.xcframework ../../../Library/sing-box/
+
+      - name: Xcode Build (Skip Signing)
+        run: |
+          # 移除干扰插件确保主程序编译成功
           rm -rf Extension IntentsExtension WidgetExtension TVExtension
           
-          # 强制 Xcode 使用我们刚才注入的 1.12.14 核心
+          # 强制 Xcode 使用我们刚才生成的 1.12.14 内核
           xcodebuild -project sing-box.xcodeproj \
                      -scheme SFI \
                      -configuration Release \
@@ -40,10 +54,10 @@ jobs:
           mkdir -p Payload
           APP_PATH=$(find build/sing-box.xcarchive -name "*.app" | head -n 1)
           cp -rp "$APP_PATH" Payload/
-          zip -r sing-box-1.12.14.ipa Payload/
+          zip -r sing-box-1.12.14-stable.ipa Payload/
 
-      - name: Upload
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: SingBox-1.12.14-IPA
-          path: sing-box-1.12.14.ipa
+          path: sing-box-1.12.14-stable.ipa
