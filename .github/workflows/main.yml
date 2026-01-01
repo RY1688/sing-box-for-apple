@@ -8,16 +8,17 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          # 🔴 核心修复 1：递归拉取子模块
+          # 🔴 强制递归拉取子模块
           submodules: recursive
           fetch-depth: 0
 
-      - name: Force Fix Submodule
+      - name: Force Fix Missing Core
         run: |
-          # 🔴 核心修复 2：如果目录还是空的，手动强行抓取核心代码
-          if [ ! -f "Library/sing-box/go.mod" ]; then
-            echo "Submodule missing, fixing..."
-            git submodule update --init --recursive
+          # 🔴 如果子模块没拉下来，手动强行克隆核心代码到正确位置
+          if [ ! -d "Library/sing-box" ] || [ ! -f "Library/sing-box/go.mod" ]; then
+            echo "Core missing, force cloning..."
+            rm -rf Library/sing-box
+            git clone https://github.com/SagerNet/sing-box.git Library/sing-box
           fi
 
       - name: Setup Go
@@ -27,24 +28,23 @@ jobs:
 
       - name: Build Core Framework
         run: |
-          # 1. 安装工具
+          # 1. 安装构建工具
           go install github.com/sagernet/gomobile@latest
           export PATH=$PATH:$(go env GOPATH)/bin
           $(go env GOPATH)/bin/gomobile init
           
-          # 2. 🔴 核心修复 3：直接进入核心代码所在的绝对路径
-          # 根据你的截图，核心代码必须在 Library/sing-box 下
+          # 2. 🔴 进入核心代码所在的绝对路径进行编译
           cd Library/sing-box
           go run ./cmd/apple framework
 
       - name: Clean Project
         run: |
-          # 🔴 核心修复 4：剔除无法免签名编译的干扰项
+          # 🔴 剔除无法免签名编译的干扰插件 (Widget等)
           find . -name "*Extension" -type d -exec rm -rf {} +
 
       - name: Build Xcode
         run: |
-          # 使用你截图中的最新工程名
+          # 🔴 使用你截图中的最新工程名: sing-box.xcodeproj
           xcodebuild -project sing-box.xcodeproj \
                      -scheme sing-box \
                      -configuration Release \
@@ -56,6 +56,7 @@ jobs:
 
       - name: Package IPA
         run: |
+          # 封装为 IPA
           mkdir -p Payload
           APP_PATH=$(find build/sing-box.xcarchive -name "*.app" | head -n 1)
           cp -r "$APP_PATH" Payload/
