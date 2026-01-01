@@ -5,57 +5,51 @@ jobs:
   build:
     runs-on: macos-14
     steps:
-      - name: Checkout
+      - name: Checkout Code
         uses: actions/checkout@v4
         with:
+          # 🔴 关键修复 1：必须深度递归拉取所有子模块核心代码
           submodules: recursive
           fetch-depth: 0
 
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
+          # 🔴 关键修复 2：禁用自动缓存，防止因找不到 go.sum 报错
           go-version: '1.23'
+          cache: false 
 
       - name: Build Core Framework
         run: |
-          # 1. 安装构建工具
+          # 强制安装 gomobile 工具
           go install github.com/sagernet/gomobile@latest
+          export PATH=$PATH:$(go env GOPATH)/bin
           gomobile init
-          # 2. 尝试执行项目自带的构建脚本
-          if [ -f "make" ]; then
-            make framework
-          else
-            go run ./cmd/apple framework
-          fi
+          
+          # 🔴 关键修复 3：直接调用项目封装好的 apple 构建命令
+          # 这会自动处理路径问题
+          go run ./cmd/apple framework
 
       - name: Build Xcode
         run: |
-          # 自动定位 .xcodeproj 文件位置
-          PROJECT_PATH=$(find . -name "*.xcodeproj" -maxdepth 2 | head -n 1)
-          SCHEME_NAME="SFI"
-          
-          echo "Using Project: $PROJECT_PATH"
-          
-          xcodebuild -project "$PROJECT_PATH" \
-                     -scheme "$SCHEME_NAME" \
+          # 强制不签名编译
+          xcodebuild -project SFI.xcodeproj \
+                     -scheme SFI \
                      -configuration Release \
                      -sdk iphoneos \
                      CODE_SIGNING_ALLOWED=NO \
                      CODE_SIGNING_REQUIRED=NO \
-                     CODE_SIGN_ENTITLEMENTS="" \
-                     BITCODE_GENERATION_MODE=bitcode \
                      clean archive -archivePath build/SFI.xcarchive
 
       - name: Package IPA
         run: |
-          # 寻找编译出的 .app 文件并封装
-          APP_PATH=$(find build/SFI.xcarchive -name "*.app" | head -n 1)
+          # 封装为 IPA
           mkdir -p Payload
-          cp -r "$APP_PATH" Payload/
-          zip -r sing-box-latest.ipa Payload/
+          cp -r build/SFI.xcarchive/Products/Applications/SFI.app Payload/
+          zip -r sing-box-dev.ipa Payload/
 
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: sing-box-ipa
-          path: sing-box-latest.ipa
+          path: sing-box-dev.ipa
