@@ -1,4 +1,4 @@
-name: Final SingBox Build
+name: Build Unsigned IPA (Force Sync Core)
 on: workflow_dispatch
 
 jobs:
@@ -8,14 +8,16 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          submodules: recursive # 🔴 尝试自动拉取
+          # 🔴 虽然配置了递归，但如果之前的任务失败，这里可能没拉全
+          submodules: recursive
           fetch-depth: 0
 
-      - name: Force Fix Missing Core
+      - name: Force Download Missing Components
         run: |
-          # 🔴 核心修复：如果子模块文件夹是空的，强行手动补全
+          # 🔴 核心修复：如果 Library 里的核心代码文件夹是空的，强行手动下载
+          # 彻底解决你本地截图里缺失 sing-box 文件夹的问题
           if [ ! -d "Library/sing-box" ] || [ ! -f "Library/sing-box/go.mod" ]; then
-            echo "Core missing, downloading..."
+            echo "Core components missing, force downloading..."
             rm -rf Library/sing-box
             git clone --recursive https://github.com/SagerNet/sing-box.git Library/sing-box
           fi
@@ -25,36 +27,42 @@ jobs:
           brew install go
           echo "$(brew --prefix go)/bin" >> $GITHUB_PATH
 
-      - name: Build Core
+      - name: Build Core Framework
         run: |
+          # 安装并初始化 gomobile
           go install github.com/sagernet/gomobile@latest
           export PATH=$PATH:$(go env GOPATH)/bin
           $(go env GOPATH)/bin/gomobile init
-          # 进入刚才补全的核心目录进行编译
+          
+          # 进入刚才强行补全的核心目录进行编译
           cd Library/sing-box
           go run ./cmd/apple framework
 
-      - name: Build Xcode
+      - name: Build Xcode (Integrated Fix)
         run: |
-          # 🔴 删除干扰组件，使用你提供的 sing-box.xcodeproj
+          # 🔴 剔除导致签名报错的插件目录
           rm -rf Extension IntentsExtension WidgetExtension TVExtension
+          
+          # 强制使用你截图中的最新工程名：sing-box.xcodeproj
           xcodebuild -project sing-box.xcodeproj \
                      -scheme SFI \
-                     -configuration Debug \
+                     -configuration Release \
                      -sdk iphoneos \
                      CODE_SIGNING_ALLOWED=NO \
                      CODE_SIGNING_REQUIRED=NO \
                      CODE_SIGN_ENTITLEMENTS="" \
                      clean archive -archivePath build/sing-box.xcarchive
 
-      - name: Package
+      - name: Package IPA
         run: |
+          # 封装为符合 TrollStore 标准的 IPA
           mkdir -p Payload
-          cp -rp build/sing-box.xcarchive/Products/Applications/*.app Payload/
+          APP_PATH=$(find build/sing-box.xcarchive -name "*.app" | head -n 1)
+          cp -rp "$APP_PATH" Payload/
           zip -r sing-box-trollstore.ipa Payload/
 
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: ipa-file
+          name: sing-box-ipa
           path: sing-box-trollstore.ipa
