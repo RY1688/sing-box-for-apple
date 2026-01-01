@@ -1,6 +1,5 @@
-name: Build SFI (Third Party Logic)
+name: Final Force Build
 on: workflow_dispatch
-
 jobs:
   build:
     runs-on: macos-14
@@ -8,41 +7,38 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          repository: SagerNet/sing-box-for-apple # 🔴 直接拉取官方仓库
-          submodules: recursive
+          submodules: 'recursive' # 强制拉取子模块
           fetch-depth: 0
 
       - name: Setup Go
-        run: |
-          brew install go
-          echo "$(brew --prefix go)/bin" >> $GITHUB_PATH
+        run: brew install go
 
       - name: Build Core
         run: |
           go install github.com/sagernet/gomobile@latest
-          gomobile init
-          # 🔴 关键：进入特定目录编译，避免根目录找不到文件的错误
-          go run ./cmd/apple framework
+          $(go env GOPATH)/bin/gomobile init
+          # 🔴 关键：直接指定绝对路径去运行构建命令
+          go run ./cmd/apple framework 
 
       - name: Build Xcode
         run: |
-          # 使用通配符寻找项目，防止路径变动
-          xcodebuild -project **/*.xcodeproj \
+          # 🔴 关键：明确告诉 Xcode 工程文件在哪里
+          xcodebuild -project SFI/SFI.xcodeproj \
                      -scheme SFI \
                      -configuration Release \
                      -sdk iphoneos \
                      CODE_SIGNING_ALLOWED=NO \
                      CODE_SIGNING_REQUIRED=NO \
-                     clean archive -archivePath build/SFI.xcarchive
+                     archive -archivePath build/SFI.xcarchive
 
-      - name: Export IPA
+      - name: Export
         run: |
           mkdir -p Payload
-          cp -r build/SFI.xcarchive/Products/Applications/*.app Payload/
-          zip -r sing-box-auto.ipa Payload/
+          cp -r build/SFI.xcarchive/Products/Applications/SFI.app Payload/
+          zip -r sing-box-trollstore.ipa Payload/
 
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: sing-box-ipa
-          path: sing-box-auto.ipa
+          name: ipa-package
+          path: sing-box-trollstore.ipa
