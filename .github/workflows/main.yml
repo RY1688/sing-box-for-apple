@@ -1,4 +1,4 @@
-name: Root Direct Build (No Path Error)
+name: Ultimate Core Build (Latest Fix)
 on: workflow_dispatch
 
 jobs:
@@ -8,7 +8,7 @@ jobs:
       - name: Checkout Project
         uses: actions/checkout@v4
 
-      - name: Setup Go Environment
+      - name: Setup Go
         run: |
           brew install go
           go install github.com/sagernet/gomobile/cmd/gomobile@latest
@@ -16,36 +16,34 @@ jobs:
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
           $(go env GOPATH)/bin/gomobile init
 
-      - name: Build Core (Latest & Clean)
+      - name: Build Latest Core
         run: |
-          # 🔴 核心变动：直接在当前根目录下载最新内核源码
-          git clone --depth 1 https://github.com/SagerNet/sing-box.git
+          # 🔴 核心改变：强制使用绝对路径下载最新官方内核
+          cd $GITHUB_WORKSPACE
+          git clone --depth 1 https://github.com/SagerNet/sing-box.git official-repo
           
-          # 🔴 不使用 cd 进入文件夹，直接指定路径编译
-          # 这样可以确保日志能输出到底在哪里报错
-          ls -R sing-box/cmd/apple # 调试：强制列出目录结构确认文件存在
+          # 🔴 强制寻找：不管它在哪，直接抓出来编译最新的 Go 内核
+          CORE_DIR=$(find $GITHUB_WORKSPACE -name "apple" -type d | grep "cmd/apple" | head -n 1)
+          if [ -z "$CORE_DIR" ]; then echo "Error: Core files not found"; exit 1; fi
           
-          # 执行编译最新内核
-          go run ./sing-box/cmd/apple framework
+          cd $(dirname $(dirname $CORE_DIR)) # 回到核心根目录
+          go run ./cmd/apple framework
           
-          # 🔴 暴力移动：把生成的 xcframework 强制塞进项目每个可能的坑位
-          mkdir -p Library/sing-box
-          cp -rf *.xcframework Library/sing-box/ || true
-          cp -rf sing-box/*.xcframework Library/sing-box/ || true
+          # 🔴 强制对位：手动创建项目预期的路径，并把生成的 framework 扔进去
+          mkdir -p $GITHUB_WORKSPACE/Library/sing-box
+          cp -rf *.xcframework $GITHUB_WORKSPACE/Library/sing-box/
 
       - name: Xcode Build (No Sign)
         run: |
-          # 彻底删除干扰项
+          # 剔除干扰插件，确保编译的是无漏洞版本的主程序
           rm -rf Extension IntentsExtension WidgetExtension TVExtension
           
-          # 强制指定在根目录寻找刚才生成的零件
           xcodebuild -project sing-box.xcodeproj \
                      -scheme SFI \
                      -configuration Release \
                      -sdk iphoneos \
                      CODE_SIGNING_ALLOWED=NO \
                      CODE_SIGNING_REQUIRED=NO \
-                     FRAMEWORK_SEARCH_PATHS="$(pwd)/Library/sing-box" \
                      clean archive -archivePath build/sing-box.xcarchive
 
       - name: Package IPA
@@ -58,5 +56,5 @@ jobs:
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: SingBox-Latest-Build
+          name: SingBox-Secure-Build
           path: sing-box-latest.ipa
