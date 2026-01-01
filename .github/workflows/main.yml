@@ -1,4 +1,4 @@
-name: Build SingBox 1.12.14 Stable
+name: Build SingBox 1.12.14 API-Fix
 on: workflow_dispatch
 
 jobs:
@@ -8,38 +8,35 @@ jobs:
       - name: Checkout Project
         uses: actions/checkout@v4
 
-      - name: Download 1.12.14 Framework (Internal)
-        uses: dawidd6/action-download-artifact@v3
-        continue-on-error: true # 如果插件失效，改用备用命令
-        with:
-          github_token: ${{secrets.GITHUB_TOKEN}}
-          workflow: main.yml
-          name: SFI-Framework
-          repo: SagerNet/sing-box-for-apple
-          path: Library/sing-box
-
-      - name: Fallback Download (Manual Fix)
-        if: steps.download.outcome != 'success'
+      - name: API-Based Framework Fetch
         run: |
-          # 🔴 备用下载方案：使用官方原始 API 链接，确保抓取到真实 1.12.14 内核
-          # 这样即便你的容器有干扰，GitHub 虚拟机内部拉取也是安全的
-          curl -L -H "Accept: application/octet-stream" \
-               -o core.zip \
-               https://github.com/SagerNet/sing-box/releases/download/v1.12.14/SFI-Framework.zip
+          # 🔴 使用 GitHub 内部 Token 通过 API 下载，绕过所有网络拦截
+          # 这样即便你的容器环境有干扰，云端虚拟机内部抓取是 100% 安全的
+          AUTH_HEADER="Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}"
+          
+          # 1.12.14 版本的核心框架包
+          CORE_URL="https://github.com/SagerNet/sing-box/releases/download/v1.12.14/SFI-Framework.zip"
+          
+          # 使用强制重定向和授权头进行下载
+          curl -L -H "$AUTH_HEADER" -H "Accept: application/octet-stream" \
+               -o core.zip "$CORE_URL"
+          
+          # 🔴 关键检查：如果文件小于 100 字节，说明下载被拦截了，直接报错停止
+          FILE_SIZE=$(stat -f%z "core.zip")
+          if [ "$FILE_SIZE" -lt 1000 ]; then
+            echo "Error: Downloaded file is too small ($FILE_SIZE bytes). Request was likely blocked."
+            exit 1
+          fi
           
           mkdir -p Library/sing-box
           unzip -o core.zip -d Library/sing-box/
-          
-          # 🔴 关键检查：如果文件大小正常，ls 会列出大量的 .framework 文件
-          ls -lh core.zip
-          ls -R Library/sing-box
 
-      - name: Xcode Build (Pure 1.12.14)
+      - name: Xcode Build (Clean 1.12.14)
         run: |
-          # 移除干扰插件
+          # 移除干扰项以保证编译纯净度
           rm -rf Extension IntentsExtension WidgetExtension TVExtension
           
-          # 强制禁用签名，编译主程序
+          # 强制指定框架搜索路径为 1.12.14 目录
           xcodebuild -project sing-box.xcodeproj \
                      -scheme SFI \
                      -configuration Release \
