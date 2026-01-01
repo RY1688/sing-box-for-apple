@@ -1,4 +1,4 @@
-name: Build SingBox 1.12.14 Stable-Final-v2
+name: Build SingBox 1.12.14 Stable-Final-v3
 on: workflow_dispatch
 
 jobs:
@@ -11,35 +11,45 @@ jobs:
       - name: Setup Go Environment
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23' #
+          go-version: '1.23'
 
-      - name: Compile 1.12.14 Core (Exact Entry Fix)
+      - name: Compile 1.12.14 Core (Auto-Locate Fix)
         run: |
-          # 🔴 克隆指定版本，确保内核无漏洞
+          # 🔴 1. 抓取 v1.12.14 源码
           git clone --branch v1.12.14 --depth 1 https://github.com/SagerNet/sing-box.git official-core
           
-          # 安装最新的 gomobile 工具
+          # 🔴 2. 安装 gomobile 工具
           go install github.com/sagernet/gomobile/cmd/gomobile@latest
           go install github.com/sagernet/gomobile/cmd/gobind@latest
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
           $(go env GOPATH)/bin/gomobile init
           
-          # 🔴 关键修复：直接进入包含 main 函数的苹果端目录进行编译
-          # 路径必须是 cmd/apple
-          cd official-core/cmd/apple
+          # 🔴 3. 核心修复：地毯式搜索 cmd/apple 所在的真实绝对路径
+          # 不再猜测路径，直接通过文件系统寻找入口
+          REAL_PATH=$(find $GITHUB_WORKSPACE/official-core -name "apple" -type d | grep "cmd/apple" | head -n 1)
+          if [ -z "$REAL_PATH" ]; then
+            echo "Error: Could not find cmd/apple in the cloned repository."
+            ls -R official-core # 调试：列出所有文件结构
+            exit 1
+          fi
+          echo "Found entry point at: $REAL_PATH"
+          
+          # 🔴 4. 强制进入该路径并执行编译
+          cd "$REAL_PATH"
           go run . framework
           
-          # 🔴 搬运零件：将生成的 xcframework 放入项目 Library 目录
-          cd ../../../
+          # 🔴 5. 搬运生成的框架
+          # 寻找刚才生成的 .xcframework 并塞进主项目的 Library
+          cd $GITHUB_WORKSPACE
           mkdir -p Library/sing-box
           find official-core -name "*.xcframework" -exec cp -rf {} Library/sing-box/ \;
 
       - name: Xcode Build (No Signing)
         run: |
-          # 移除干扰插件确保主程序编译
+          # 移除干扰插件确保主程序编译成功
           rm -rf Extension IntentsExtension WidgetExtension TVExtension
           
-          # 强制指定在 Library/sing-box 寻找 1.12.14 内核
+          # 强制指定在刚才搬运的路径寻找内核
           xcodebuild -project sing-box.xcodeproj \
                      -scheme SFI \
                      -configuration Release \
