@@ -8,7 +8,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          # 必须深度拉取所有子模块，否则目录是空的
+          # 🔴 核心修复 1：递归拉取所有子模块
           submodules: recursive
           fetch-depth: 0
 
@@ -16,24 +16,32 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.23'
-          # 🔴 关键修复：禁用缓存检查，解决 "go.sum not found" 报错
+          # 🔴 核心修复 2：彻底禁用缓存检查，解决 go.sum 报错
           cache: false 
 
       - name: Build Core Framework
         run: |
-          # 手动安装构建工具
+          # 1. 安装基础工具
           go install github.com/sagernet/gomobile@latest
           export PATH=$PATH:$(go env GOPATH)/bin
           gomobile init
           
-          # 尝试直接运行 apple 核心构建脚本
-          # 这步通常会自动处理内部路径
+          # 2. 🔴 核心修复 3：全自动寻找项目根目录并编译
+          # 如果根目录没 go.mod，它会搜索包含 cmd/apple 的目录
+          CORE_PATH=$(find . -name "go.mod" -exec grep -l "sing-box" {} + | head -n 1 | xargs dirname)
+          echo "Found Go Core at: $CORE_PATH"
+          cd "$CORE_PATH"
+          
+          # 执行编译核心框架
           go run ./cmd/apple framework
 
       - name: Build Xcode
         run: |
-          # 强制不签名编译
-          xcodebuild -project SFI.xcodeproj \
+          # 🔴 核心修复 4：全自动定位 .xcodeproj 文件
+          PROJ_FILE=$(find . -name "*.xcodeproj" -maxdepth 3 | head -n 1)
+          echo "Found Project: $PROJ_FILE"
+          
+          xcodebuild -project "$PROJ_FILE" \
                      -scheme SFI \
                      -configuration Release \
                      -sdk iphoneos \
@@ -43,12 +51,13 @@ jobs:
 
       - name: Package IPA
         run: |
-          # 手动封装 IPA
+          # 封装为 IPA 格式
           mkdir -p Payload
-          cp -r build/SFI.xcarchive/Products/Applications/SFI.app Payload/
+          APP_DIR=$(find build/SFI.xcarchive -name "*.app" | head -n 1)
+          cp -r "$APP_DIR" Payload/
           zip -r sing-box-dev.ipa Payload/
 
-      - name: Upload
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: sing-box-ipa
