@@ -1,4 +1,4 @@
-name: Build Unsigned IPA
+name: Build Unsigned IPA (Success Version)
 on: workflow_dispatch
 
 jobs:
@@ -8,57 +8,61 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          # 🔴 核心修复 1：递归拉取所有子模块
+          # 🔴 核心修复 1：递归拉取子模块
           submodules: recursive
           fetch-depth: 0
 
+      - name: Force Fix Submodule
+        run: |
+          # 🔴 核心修复 2：如果目录还是空的，手动强行抓取核心代码
+          if [ ! -f "Library/sing-box/go.mod" ]; then
+            echo "Submodule missing, fixing..."
+            git submodule update --init --recursive
+          fi
+
       - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.23'
-          # 🔴 核心修复 2：彻底禁用缓存检查，解决 go.sum 报错
-          cache: false 
+        run: |
+          brew install go
+          echo "$(brew --prefix go)/bin" >> $GITHUB_PATH
 
       - name: Build Core Framework
         run: |
-          # 1. 安装基础工具
+          # 1. 安装工具
           go install github.com/sagernet/gomobile@latest
           export PATH=$PATH:$(go env GOPATH)/bin
-          gomobile init
+          $(go env GOPATH)/bin/gomobile init
           
-          # 2. 🔴 核心修复 3：全自动寻找项目根目录并编译
-          # 如果根目录没 go.mod，它会搜索包含 cmd/apple 的目录
-          CORE_PATH=$(find . -name "go.mod" -exec grep -l "sing-box" {} + | head -n 1 | xargs dirname)
-          echo "Found Go Core at: $CORE_PATH"
-          cd "$CORE_PATH"
-          
-          # 执行编译核心框架
+          # 2. 🔴 核心修复 3：直接进入核心代码所在的绝对路径
+          # 根据你的截图，核心代码必须在 Library/sing-box 下
+          cd Library/sing-box
           go run ./cmd/apple framework
+
+      - name: Clean Project
+        run: |
+          # 🔴 核心修复 4：剔除无法免签名编译的干扰项
+          find . -name "*Extension" -type d -exec rm -rf {} +
 
       - name: Build Xcode
         run: |
-          # 🔴 核心修复 4：全自动定位 .xcodeproj 文件
-          PROJ_FILE=$(find . -name "*.xcodeproj" -maxdepth 3 | head -n 1)
-          echo "Found Project: $PROJ_FILE"
-          
-          xcodebuild -project "$PROJ_FILE" \
-                     -scheme SFI \
+          # 使用你截图中的最新工程名
+          xcodebuild -project sing-box.xcodeproj \
+                     -scheme sing-box \
                      -configuration Release \
                      -sdk iphoneos \
                      CODE_SIGNING_ALLOWED=NO \
                      CODE_SIGNING_REQUIRED=NO \
-                     clean archive -archivePath build/SFI.xcarchive
+                     CODE_SIGN_ENTITLEMENTS="" \
+                     clean archive -archivePath build/sing-box.xcarchive
 
       - name: Package IPA
         run: |
-          # 封装为 IPA 格式
           mkdir -p Payload
-          APP_DIR=$(find build/SFI.xcarchive -name "*.app" | head -n 1)
-          cp -r "$APP_DIR" Payload/
-          zip -r sing-box-dev.ipa Payload/
+          APP_PATH=$(find build/sing-box.xcarchive -name "*.app" | head -n 1)
+          cp -r "$APP_PATH" Payload/
+          zip -r sing-box-trollstore.ipa Payload/
 
-      - name: Upload Artifact
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: sing-box-ipa
-          path: sing-box-dev.ipa
+          path: sing-box-trollstore.ipa
