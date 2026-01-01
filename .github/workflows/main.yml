@@ -8,26 +8,26 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          # 🔴 关键修复 1：必须深度递归拉取所有子模块核心代码
+          # 必须深度拉取所有子模块，否则目录是空的
           submodules: recursive
           fetch-depth: 0
 
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          # 🔴 关键修复 2：禁用自动缓存，防止因找不到 go.sum 报错
           go-version: '1.23'
+          # 🔴 关键修复：禁用缓存检查，解决 "go.sum not found" 报错
           cache: false 
 
       - name: Build Core Framework
         run: |
-          # 强制安装 gomobile 工具
+          # 手动安装构建工具
           go install github.com/sagernet/gomobile@latest
           export PATH=$PATH:$(go env GOPATH)/bin
           gomobile init
           
-          # 🔴 关键修复 3：直接调用项目封装好的 apple 构建命令
-          # 这会自动处理路径问题
+          # 尝试直接运行 apple 核心构建脚本
+          # 这步通常会自动处理内部路径
           go run ./cmd/apple framework
 
       - name: Build Xcode
@@ -43,7 +43,7 @@ jobs:
 
       - name: Package IPA
         run: |
-          # 封装为 IPA
+          # 手动封装 IPA
           mkdir -p Payload
           cp -r build/SFI.xcarchive/Products/Applications/SFI.app Payload/
           zip -r sing-box-dev.ipa Payload/
