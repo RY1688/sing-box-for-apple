@@ -1,44 +1,57 @@
-name: Final Force Build
+name: Build Unsigned IPA
 on: workflow_dispatch
+
 jobs:
   build:
     runs-on: macos-14
     steps:
-      - name: Checkout
+      - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          submodules: 'recursive' # 强制拉取子模块
+          # 🔴 关键：必须递归拉取子模块，否则 Library 文件夹是空的
+          submodules: recursive
           fetch-depth: 0
 
-      - name: Setup Go
-        run: brew install go
-
-      - name: Build Core
+      - name: Manual Setup Go
         run: |
+          # 🔴 关键：直接通过 brew 安装，避开官方 Action 对 go.sum 的严格检查
+          brew install go
+          echo "$(brew --prefix go)/bin" >> $GITHUB_PATH
+
+      - name: Build Core Framework
+        run: |
+          # 1. 安装构建工具
           go install github.com/sagernet/gomobile@latest
+          export PATH=$PATH:$(go env GOPATH)/bin
           $(go env GOPATH)/bin/gomobile init
-          # 🔴 关键：直接指定绝对路径去运行构建命令
-          go run ./cmd/apple framework 
+          
+          # 2. 🔴 关键：进入核心子模块目录编译，解决找不到依赖文件的问题
+          cd Library/sing-box
+          go run ./cmd/apple framework
 
-      - name: Build Xcode
+      - name: Build Xcode Project
         run: |
-          # 🔴 关键：明确告诉 Xcode 工程文件在哪里
+          # 🔴 关键：使用 xcodebuild 强制不签名编译
+          # 自动定位项目文件并打包成存档
           xcodebuild -project SFI/SFI.xcodeproj \
                      -scheme SFI \
                      -configuration Release \
                      -sdk iphoneos \
                      CODE_SIGNING_ALLOWED=NO \
                      CODE_SIGNING_REQUIRED=NO \
-                     archive -archivePath build/SFI.xcarchive
+                     CODE_SIGN_ENTITLEMENTS="" \
+                     BITCODE_GENERATION_MODE=bitcode \
+                     clean archive -archivePath build/SFI.xcarchive
 
-      - name: Export
+      - name: Package IPA
         run: |
+          # 🔴 关键：手动封装 Payload 文件夹，这是 TrollStore 识别 IPA 的标准格式
           mkdir -p Payload
           cp -r build/SFI.xcarchive/Products/Applications/SFI.app Payload/
-          zip -r sing-box-trollstore.ipa Payload/
+          zip -r sing-box-dev.ipa Payload/
 
-      - name: Upload
+      - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: ipa-package
-          path: sing-box-trollstore.ipa
+          name: sing-box-ipa
+          path: sing-box-dev.ipa
