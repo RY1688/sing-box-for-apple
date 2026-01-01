@@ -8,39 +8,31 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          # 🔴 核心修复 1：递归拉取所有子模块
           submodules: recursive
           fetch-depth: 0
 
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.23'
-          # 🔴 核心修复 2：彻底禁用缓存检查，解决 go.sum 报错
-          cache: false 
+      - name: Manual Setup Go
+        run: |
+          # 🔴 关键修复：直接用 brew 安装 Go，绕过官方 Action 的 go.sum 检查
+          brew install go
+          echo "GOROOT=$(brew --prefix go)/libexec" >> $GITHUB_ENV
+          echo "$(brew --prefix go)/bin" >> $GITHUB_PATH
 
       - name: Build Core Framework
         run: |
-          # 1. 安装基础工具
-          go install github.com/sagernet/gomobile@latest
+          # 1. 准备环境
           export PATH=$PATH:$(go env GOPATH)/bin
+          go install github.com/sagernet/gomobile@latest
           gomobile init
           
-          # 2. 🔴 核心修复 3：全自动寻找项目根目录并编译
-          # 如果根目录没 go.mod，它会搜索包含 cmd/apple 的目录
-          CORE_PATH=$(find . -name "go.mod" -exec grep -l "sing-box" {} + | head -n 1 | xargs dirname)
-          echo "Found Go Core at: $CORE_PATH"
-          cd "$CORE_PATH"
-          
-          # 执行编译核心框架
-          go run ./cmd/apple framework
+          # 2. 尝试编译核心
+          # 如果直接运行失败，脚本会尝试进入子目录运行
+          go run ./cmd/apple framework || (cd $(find . -name "go.mod" -exec dirname {} + | head -n 1) && go run ./cmd/apple framework)
 
       - name: Build Xcode
         run: |
-          # 🔴 核心修复 4：全自动定位 .xcodeproj 文件
+          # 自动寻找并编译项目
           PROJ_FILE=$(find . -name "*.xcodeproj" -maxdepth 3 | head -n 1)
-          echo "Found Project: $PROJ_FILE"
-          
           xcodebuild -project "$PROJ_FILE" \
                      -scheme SFI \
                      -configuration Release \
@@ -51,7 +43,6 @@ jobs:
 
       - name: Package IPA
         run: |
-          # 封装为 IPA 格式
           mkdir -p Payload
           APP_DIR=$(find build/SFI.xcarchive -name "*.app" | head -n 1)
           cp -r "$APP_DIR" Payload/
