@@ -1,4 +1,4 @@
-name: Build SingBox 1.12.14 Stable-Final
+name: Build SingBox 1.12.14 Stable-Final-v2
 on: workflow_dispatch
 
 jobs:
@@ -11,9 +11,9 @@ jobs:
       - name: Setup Go Environment
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23' # 使用最新 Go 以支持 1.12.14 编译
+          go-version: '1.23' #
 
-      - name: Compile 1.12.14 Core (Dynamic Path Fix)
+      - name: Compile 1.12.14 Core (Exact Entry Fix)
         run: |
           # 🔴 克隆指定版本，确保内核无漏洞
           git clone --branch v1.12.14 --depth 1 https://github.com/SagerNet/sing-box.git official-core
@@ -24,18 +24,13 @@ jobs:
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
           $(go env GOPATH)/bin/gomobile init
           
-          # 🔴 动态定位：不指定死路径，直接搜寻 apple 核心构建脚本的位置
-          CORE_PATH=$(find official-core -name "apple" -type d | grep "cmd/apple" | head -n 1)
-          echo "Found Core Path at: $CORE_PATH"
-          
-          # 进入核心所在的层级进行编译
-          cd official-core
-          go run ./$(relative_path_to_core_from_here) # 脚本会自动处理
-          # 如果上述动态命令复杂，我们直接强制尝试两个可能的路径：
-          go run ./cmd/apple framework || go run ./apple/cmd/apple framework || echo "Fallback search needed"
+          # 🔴 关键修复：直接进入包含 main 函数的苹果端目录进行编译
+          # 路径必须是 cmd/apple
+          cd official-core/cmd/apple
+          go run . framework
           
           # 🔴 搬运零件：将生成的 xcframework 放入项目 Library 目录
-          cd ..
+          cd ../../../
           mkdir -p Library/sing-box
           find official-core -name "*.xcframework" -exec cp -rf {} Library/sing-box/ \;
 
@@ -57,7 +52,6 @@ jobs:
       - name: Package IPA
         run: |
           mkdir -p Payload
-          # 寻找生成的 1.12.14 .app 文件夹
           APP_PATH=$(find build/sing-box.xcarchive -name "*.app" | head -n 1)
           cp -rp "$APP_PATH" Payload/
           zip -r sing-box-1.12.14-stable.ipa Payload/
