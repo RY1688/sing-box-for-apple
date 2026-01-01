@@ -1,4 +1,4 @@
-name: Build Unsigned IPA (Submodule Fix)
+name: Build Sing-Box IPA (Final Version)
 on: workflow_dispatch
 
 jobs:
@@ -8,7 +8,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          # 🔴 核心修复 1：强制拉取那个“带箭头”的 sing-box 文件夹
+          # 🔴 关键：必须递归拉取所有依赖，否则代码是不全的
           submodules: recursive
           fetch-depth: 0
 
@@ -22,20 +22,25 @@ jobs:
           # 1. 安装构建工具
           go install github.com/sagernet/gomobile@latest
           export PATH=$PATH:$(go env GOPATH)/bin
-          $(go env GOPATH)/bin/gomobile init
+          gomobile init
           
-          # 2. 🔴 核心修复 2：进入那个之前是“空壳”的目录执行编译
-          cd Library/sing-box
+          # 2. 🔴 关键修复：全自动寻找 go.mod 所在位置并执行编译
+          # 无论核心在哪个文件夹，它都能找到并进去编译
+          CORE_PATH=$(find . -name "go.mod" -exec grep -l "sing-box" {} + | head -n 1 | xargs dirname)
+          echo "Found Core at: $CORE_PATH"
+          cd "$CORE_PATH"
           go run ./cmd/apple framework
 
       - name: Clean Extensions
         run: |
-          # 🔴 核心修复 3：删除所有会导致签名报错的干扰模块
-          rm -rf Extension FileProviderExtension IntentsExtension TVExtension WidgetExtension SystemExtension SFM.System
+          # 🔴 关键修复：强行删除所有会导致签名报错的插件目录
+          # 只要这些文件夹在，没有苹果证书就一定会报错
+          find . -name "*Extension" -type d -exec rm -rf {} +
+          rm -rf SFM.System
 
-      - name: Build Xcode Project
+      - name: Build Xcode
         run: |
-          # 🔴 使用你截图中最新的工程名
+          # 🔴 使用你截图中看到的最新工程名
           xcodebuild -project sing-box.xcodeproj \
                      -scheme sing-box \
                      -configuration Release \
@@ -43,17 +48,19 @@ jobs:
                      CODE_SIGNING_ALLOWED=NO \
                      CODE_SIGNING_REQUIRED=NO \
                      CODE_SIGN_ENTITLEMENTS="" \
+                     BITCODE_GENERATION_MODE=bitcode \
                      clean archive -archivePath build/sing-box.xcarchive
 
       - name: Package IPA
         run: |
+          # 封装为 TrollStore 可用的 IPA
           mkdir -p Payload
           APP_PATH=$(find build/sing-box.xcarchive -name "*.app" | head -n 1)
           cp -r "$APP_PATH" Payload/
-          zip -r sing-box-trollstore.ipa Payload/
+          zip -r sing-box-final.ipa Payload/
 
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: sing-box-ipa
-          path: sing-box-trollstore.ipa
+          path: sing-box-final.ipa
