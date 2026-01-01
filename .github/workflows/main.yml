@@ -1,4 +1,4 @@
-name: Build SingBox 1.12.14 Final-Pass
+name: Final Build SingBox 1.12.14 Stable
 on: workflow_dispatch
 
 jobs:
@@ -8,44 +8,24 @@ jobs:
       - name: Checkout Project
         uses: actions/checkout@v4
 
-      - name: Setup Go Environment
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.23'
-
-      - name: Compile 1.12.14 Core Framework
+      - name: Inject 1.12.14 Core Framework
         run: |
-          export GOPROXY=https://proxy.golang.org,direct
+          # 🔴 直接拉取官方为 iOS 准备的 1.12.14 核心零件
+          curl -L -o core.zip https://github.com/SagerNet/sing-box/releases/download/v1.12.14/SFI-Framework.zip
           
-          # 1. 🔴 彻底清理并下载 v1.12.14 源码
-          rm -rf official-core
-          git clone --branch v1.12.14 --depth 1 https://github.com/SagerNet/sing-box.git official-core
-          
-          # 2. 安装并初始化编译工具
-          go install github.com/sagernet/gomobile/cmd/gomobile@latest
-          go install github.com/sagernet/gomobile/cmd/gobind@latest
-          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
-          $(go env GOPATH)/bin/gomobile init
-          
-          # 3. 🔴 关键修复：暴力定位。不管源码在哪，直接找出包含 apple 核心的目录
-          # 并执行官方的 framework 生成命令
-          CORE_DIR=$(find official-core -name "apple" -type d | grep "cmd/apple" | head -n 1)
-          if [ -z "$CORE_DIR" ]; then echo "Error: Core entry not found"; exit 1; fi
-          
-          cd "$CORE_DIR"
-          go run . framework -v
-          
-          # 4. 🔴 零件搬运：把新鲜出炉的 .xcframework 强行对位到项目 Library
-          cd $GITHUB_WORKSPACE
+          # 强制创建目标零件坑位
           mkdir -p Library/sing-box
-          find official-core -name "*.xcframework" -exec cp -rf {} Library/sing-box/ \;
+          unzip -o core.zip -d Library/sing-box/
+          
+          # 🔴 关键验证：如果这一步列出了 xcframework，就说明零件已到位
+          ls -R Library/sing-box
 
-      - name: Xcode Build (No Signing)
+      - name: Xcode Build (TrollStore Compatible)
         run: |
-          # 移除干扰插件确保主程序纯净
+          # 移除导致证书报错的干扰项
           rm -rf Extension IntentsExtension WidgetExtension TVExtension
           
-          # 强制 Xcode 在我们刚刚准备好的 Library 路径寻找 1.12.14 内核
+          # 强制 Xcode 使用我们刚才注入的 1.12.14 核心
           xcodebuild -project sing-box.xcodeproj \
                      -scheme SFI \
                      -configuration Release \
@@ -55,16 +35,15 @@ jobs:
                      FRAMEWORK_SEARCH_PATHS="$(pwd)/Library/sing-box" \
                      clean archive -archivePath build/sing-box.xcarchive
 
-      - name: Package IPA
+      - name: Export IPA
         run: |
           mkdir -p Payload
-          # 提取编译成功的 1.12.14 .app 文件夹
           APP_PATH=$(find build/sing-box.xcarchive -name "*.app" | head -n 1)
           cp -rp "$APP_PATH" Payload/
-          zip -r sing-box-1.12.14-trollstore.ipa Payload/
+          zip -r sing-box-1.12.14.ipa Payload/
 
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: SingBox-1.12.14-IPA
-          path: sing-box-1.12.14-trollstore.ipa
+          path: sing-box-1.12.14.ipa
