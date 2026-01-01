@@ -1,32 +1,45 @@
-name: Build SingBox 1.12.14 (Fixed Network Path)
+name: Build SingBox 1.12.14 Stable
 on: workflow_dispatch
 
 jobs:
   build:
     runs-on: macos-14
     steps:
-      - name: Checkout Code
+      - name: Checkout Project
         uses: actions/checkout@v4
 
-      - name: Fetch 1.12.14 Core Framework
+      - name: Download 1.12.14 Framework (Internal)
+        uses: dawidd6/action-download-artifact@v3
+        continue-on-error: true # 如果插件失效，改用备用命令
+        with:
+          github_token: ${{secrets.GITHUB_TOKEN}}
+          workflow: main.yml
+          name: SFI-Framework
+          repo: SagerNet/sing-box-for-apple
+          path: Library/sing-box
+
+      - name: Fallback Download (Manual Fix)
+        if: steps.download.outcome != 'success'
         run: |
-          # 🔴 使用 curl 替代 git clone，彻底解决路径不存在的问题
-          # 直接抓取官方 1.12.14 编译好的二进制核心
-          curl -L -o core.zip https://github.com/SagerNet/sing-box/releases/download/v1.12.14/SFI-Framework.zip
+          # 🔴 备用下载方案：使用官方原始 API 链接，确保抓取到真实 1.12.14 内核
+          # 这样即便你的容器有干扰，GitHub 虚拟机内部拉取也是安全的
+          curl -L -H "Accept: application/octet-stream" \
+               -o core.zip \
+               https://github.com/SagerNet/sing-box/releases/download/v1.12.14/SFI-Framework.zip
           
-          # 创建目录并强制对位
           mkdir -p Library/sing-box
-          unzip core.zip -d Library/sing-box/
+          unzip -o core.zip -d Library/sing-box/
           
-          # 🔴 关键调试：列出文件确保下载成功，不再报 directory not found
+          # 🔴 关键检查：如果文件大小正常，ls 会列出大量的 .framework 文件
+          ls -lh core.zip
           ls -R Library/sing-box
 
-      - name: Xcode Build (Clean & Pure)
+      - name: Xcode Build (Pure 1.12.14)
         run: |
-          # 移除干扰插件以确保稳定编译
+          # 移除干扰插件
           rm -rf Extension IntentsExtension WidgetExtension TVExtension
           
-          # 强制指定在刚才下载的路径寻找 1.12.14 内核
+          # 强制禁用签名，编译主程序
           xcodebuild -project sing-box.xcodeproj \
                      -scheme SFI \
                      -configuration Release \
@@ -39,7 +52,6 @@ jobs:
       - name: Package IPA
         run: |
           mkdir -p Payload
-          # 寻找编译好的 1.12.14 核心程序包
           APP_PATH=$(find build/sing-box.xcarchive -name "*.app" | head -n 1)
           cp -rp "$APP_PATH" Payload/
           zip -r sing-box-1.12.14.ipa Payload/
