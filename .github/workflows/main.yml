@@ -1,4 +1,4 @@
-name: Build Unsigned IPA (Script Integrated)
+name: Build Sing-Box IPA (Manual Force)
 on: workflow_dispatch
 
 jobs:
@@ -8,15 +8,17 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          # 🔴 核心修复 1：强制拉取所有缺失的子模块（解决 Library 为空的问题）
+          # 🔴 强制拉取子模块
           submodules: recursive
           fetch-depth: 0
 
-      - name: Force Setup Core
+      - name: Force Download Missing Core
         run: |
-          # 🔴 核心修复 2：如果子模块没拉下来，手动强行抓取
-          if [ ! -d "Library/sing-box" ]; then
-            git submodule update --init --recursive
+          # 🔴 如果 Library/sing-box 是空的，强行下载它
+          if [ ! -d "Library/sing-box" ] || [ ! -f "Library/sing-box/go.mod" ]; then
+            echo "Core missing, force downloading..."
+            rm -rf Library/sing-box
+            git clone --recursive https://github.com/SagerNet/sing-box.git Library/sing-box
           fi
 
       - name: Setup Go
@@ -26,42 +28,42 @@ jobs:
 
       - name: Build Core Framework
         run: |
-          # 模拟脚本中的 Go 环境准备
           go install github.com/sagernet/gomobile@latest
           export PATH=$PATH:$(go env GOPATH)/bin
           $(go env GOPATH)/bin/gomobile init
-          
-          # 编译核心 framework
+          # 进入核心目录编译
           cd Library/sing-box
           go run ./cmd/apple framework
 
-      - name: Build Xcode (Integrated Logic)
+      - name: Build Xcode (Using your script logic)
         run: |
-          # 🔴 使用你脚本中的变量：sing-box.xcodeproj 和 SFI scheme
-          # 开启 CODE_SIGNING_ALLOWED=NO 确保免签名构建
+          # 🔴 核心修复：移除所有干扰插件，只编主程序
+          rm -rf Extension IntentsExtension WidgetExtension TVExtension
+          
+          # 执行编译 (参考你的 make_ios.sh 逻辑)
           xcodebuild -project sing-box.xcodeproj \
                      -scheme SFI \
+                     -destination generic/platform=iOS \
                      -configuration Debug \
                      -sdk iphoneos \
-                     -destination generic/platform=iOS \
                      CODE_SIGNING_ALLOWED=NO \
                      CODE_SIGNING_REQUIRED=NO \
                      CODE_SIGN_ENTITLEMENTS="" \
-                     BITCODE_GENERATION_MODE=bitcode \
-                     clean archive -archivePath build/sing-box.xcarchive
+                     clean build install \
+                     DSTROOT=packages/
 
       - name: Package IPA (make_ios.sh logic)
         run: |
-          # 创建 Payload 文件夹，这是打包标准
+          # 按照你脚本的逻辑封装 Payload
           mkdir -p packages/Payload
-          APP_PATH=$(find build/sing-box.xcarchive -name "*.app" | head -n 1)
-          cp -r "$APP_PATH" packages/Payload/
+          # 寻找生成的 .app 并复制
+          APP_DIR=$(find packages/Applications -name "*.app" | head -n 1)
+          cp -rp "$APP_DIR" packages/Payload/
           cd packages
-          # 压缩为符合 TrollStore 要求的 IPA
-          zip -qr sing-box-dev.ipa Payload/
+          zip -qr sing-box-trollstore.ipa Payload/
 
-      - name: Upload Artifact
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: sing-box-ipa
-          path: packages/sing-box-dev.ipa
+          path: packages/sing-box-trollstore.ipa
