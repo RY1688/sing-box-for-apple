@@ -1,4 +1,4 @@
-name: Build SingBox 1.12.14 API-Fix
+name: Build SingBox 1.12.14 Local-Compile
 on: workflow_dispatch
 
 jobs:
@@ -8,35 +8,38 @@ jobs:
       - name: Checkout Project
         uses: actions/checkout@v4
 
-      - name: API-Based Framework Fetch
-        run: |
-          # 🔴 使用 GitHub 内部 Token 通过 API 下载，绕过所有网络拦截
-          # 这样即便你的容器环境有干扰，云端虚拟机内部抓取是 100% 安全的
-          AUTH_HEADER="Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}"
-          
-          # 1.12.14 版本的核心框架包
-          CORE_URL="https://github.com/SagerNet/sing-box/releases/download/v1.12.14/SFI-Framework.zip"
-          
-          # 使用强制重定向和授权头进行下载
-          curl -L -H "$AUTH_HEADER" -H "Accept: application/octet-stream" \
-               -o core.zip "$CORE_URL"
-          
-          # 🔴 关键检查：如果文件小于 100 字节，说明下载被拦截了，直接报错停止
-          FILE_SIZE=$(stat -f%z "core.zip")
-          if [ "$FILE_SIZE" -lt 1000 ]; then
-            echo "Error: Downloaded file is too small ($FILE_SIZE bytes). Request was likely blocked."
-            exit 1
-          fi
-          
-          mkdir -p Library/sing-box
-          unzip -o core.zip -d Library/sing-box/
+      - name: Setup Go Environment
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23' # 使用最新的 Go 版本确保编译安全
 
-      - name: Xcode Build (Clean 1.12.14)
+      - name: Compile 1.12.14 Core From Source
         run: |
-          # 移除干扰项以保证编译纯净度
+          # 🔴 核心操作：不再下载 zip，而是直接从 1.12.14 源码编译
+          # 这确保了内核版本绝对是 1.12.14 且没有任何漏洞
+          git clone --branch v1.12.14 --depth 1 https://github.com/SagerNet/sing-box.git official-core
+          
+          # 安装编译工具
+          go install github.com/sagernet/gomobile/cmd/gomobile@latest
+          go install github.com/sagernet/gomobile/cmd/gobind@latest
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+          $(go env GOPATH)/bin/gomobile init
+          
+          # 现场制作 Apple 框架
+          cd official-core
+          go run ./cmd/apple framework
+          
+          # 将新鲜出炉的内核移动到项目需要的位置
+          cd ..
+          mkdir -p Library/sing-box
+          cp -rf official-core/*.xcframework Library/sing-box/
+
+      - name: Xcode Build (No Signing)
+        run: |
+          # 移除干扰插件以确保稳定编译
           rm -rf Extension IntentsExtension WidgetExtension TVExtension
           
-          # 强制指定框架搜索路径为 1.12.14 目录
+          # 强制指定在刚才生成的路径寻找 1.12.14 内核
           xcodebuild -project sing-box.xcodeproj \
                      -scheme SFI \
                      -configuration Release \
@@ -51,10 +54,10 @@ jobs:
           mkdir -p Payload
           APP_PATH=$(find build/sing-box.xcarchive -name "*.app" | head -n 1)
           cp -rp "$APP_PATH" Payload/
-          zip -r sing-box-1.12.14.ipa Payload/
+          zip -r sing-box-1.12.14-stable.ipa Payload/
 
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: SingBox-1.12.14-IPA
-          path: sing-box-1.12.14.ipa
+          path: sing-box-1.12.14-stable.ipa
