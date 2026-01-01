@@ -1,4 +1,4 @@
-name: Build Unsigned IPA (Force Sync Core)
+name: Build Pure IPA for TrollStore
 on: workflow_dispatch
 
 jobs:
@@ -8,42 +8,38 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          # 🔴 虽然配置了递归，但如果之前的任务失败，这里可能没拉全
-          submodules: recursive
+          submodules: recursive # 🔴 尝试拉取子模块
           fetch-depth: 0
 
-      - name: Force Download Missing Components
+      - name: Force Sync Core
         run: |
-          # 🔴 核心修复：如果 Library 里的核心代码文件夹是空的，强行手动下载
-          # 彻底解决你本地截图里缺失 sing-box 文件夹的问题
+          # 🔴 核心修复：如果子模块文件夹是空的，强行手动下载
           if [ ! -d "Library/sing-box" ] || [ ! -f "Library/sing-box/go.mod" ]; then
-            echo "Core components missing, force downloading..."
             rm -rf Library/sing-box
             git clone --recursive https://github.com/SagerNet/sing-box.git Library/sing-box
           fi
 
-      - name: Setup Go
+      - name: Setup Go & Gomobile
         run: |
           brew install go
-          echo "$(brew --prefix go)/bin" >> $GITHUB_PATH
-
-      - name: Build Core Framework
-        run: |
-          # 安装并初始化 gomobile
           go install github.com/sagernet/gomobile@latest
           export PATH=$PATH:$(go env GOPATH)/bin
           $(go env GOPATH)/bin/gomobile init
-          
-          # 进入刚才强行补全的核心目录进行编译
+
+      - name: Build Core Framework
+        run: |
+          export PATH=$PATH:$(go env GOPATH)/bin
+          # 进入补全后的核心目录
           cd Library/sing-box
           go run ./cmd/apple framework
 
-      - name: Build Xcode (Integrated Fix)
+      - name: Build Xcode (Pure Mode)
         run: |
-          # 🔴 剔除导致签名报错的插件目录
-          rm -rf Extension IntentsExtension WidgetExtension TVExtension
+          # 🔴 剔除干扰：删除所有会导致签名报错的 Extension 文件夹
+          find . -name "*Extension" -type d -exec rm -rf {} +
           
-          # 强制使用你截图中的最新工程名：sing-box.xcodeproj
+          # 使用你截图中的工程名 sing-box.xcodeproj
+          # 彻底禁用签名，只产出纯净的 .app
           xcodebuild -project sing-box.xcodeproj \
                      -scheme SFI \
                      -configuration Release \
@@ -53,16 +49,17 @@ jobs:
                      CODE_SIGN_ENTITLEMENTS="" \
                      clean archive -archivePath build/sing-box.xcarchive
 
-      - name: Package IPA
+      - name: Package for TrollStore
         run: |
-          # 封装为符合 TrollStore 标准的 IPA
+          # 建立标准 Payload 结构
           mkdir -p Payload
+          # 寻找生成的 .app 并存入
           APP_PATH=$(find build/sing-box.xcarchive -name "*.app" | head -n 1)
           cp -rp "$APP_PATH" Payload/
           zip -r sing-box-trollstore.ipa Payload/
 
-      - name: Upload
+      - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: sing-box-ipa
+          name: TrollStore-IPA
           path: sing-box-trollstore.ipa
