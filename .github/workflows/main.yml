@@ -5,41 +5,37 @@ jobs:
   build:
     runs-on: macos-14
     steps:
-      - name: Checkout Main Code
+      - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          # 🔴 关键修复：显式要求递归拉取所有缺失的子模块
+          # 🔴 核心修复 1：强制拉取那个“带箭头”的 sing-box 文件夹
           submodules: recursive
           fetch-depth: 0
 
-      - name: Setup Go Environment
+      - name: Setup Go
         run: |
           brew install go
           echo "$(brew --prefix go)/bin" >> $GITHUB_PATH
 
-      - name: Force Init Submodules (Double Check)
-        run: |
-          # 🔴 关键修复：如果 Checkout 没拉全，这里强制再拉一次
-          git submodule update --init --recursive
-
       - name: Build Core Framework
         run: |
+          # 1. 安装构建工具
           go install github.com/sagernet/gomobile@latest
           export PATH=$PATH:$(go env GOPATH)/bin
           $(go env GOPATH)/bin/gomobile init
           
-          # 🔴 关键修复：进入正确的子模块目录（现在它不再是空的了）
+          # 2. 🔴 核心修复 2：进入那个之前是“空壳”的目录执行编译
           cd Library/sing-box
           go run ./cmd/apple framework
 
       - name: Clean Extensions
         run: |
-          # 删除所有无证书无法编译的扩展
+          # 🔴 核心修复 3：删除所有会导致签名报错的干扰模块
           rm -rf Extension FileProviderExtension IntentsExtension TVExtension WidgetExtension SystemExtension SFM.System
 
       - name: Build Xcode Project
         run: |
-          # 使用你截图中的最新工程名
+          # 🔴 使用你截图中最新的工程名
           xcodebuild -project sing-box.xcodeproj \
                      -scheme sing-box \
                      -configuration Release \
